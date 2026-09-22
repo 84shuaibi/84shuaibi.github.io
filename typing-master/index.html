@@ -1838,6 +1838,11 @@ TM.i18n = (function () {
       'settings.theme': '配色主题',
       'settings.fontSize': '字号',
       'settings.showKeyboard': '显示虚拟键盘',
+      'settings.kbLayout': '键盘布局',
+      'settings.kbLayoutDesc': 'MacBook 或 Windows 键盘，留「自动」按系统识别',
+      'common.auto': '自动',
+      'common.mac': 'Mac',
+      'common.win': 'Windows',
       'settings.showHands': '显示手指分区',
       'settings.showLiveStats': '显示实时数据',
       'settings.focusLine': '当前行高亮',
@@ -2100,6 +2105,11 @@ TM.i18n = (function () {
       'settings.theme': 'Theme',
       'settings.fontSize': 'Font size',
       'settings.showKeyboard': 'Show virtual keyboard',
+      'settings.kbLayout': 'Keyboard layout',
+      'settings.kbLayoutDesc': 'MacBook or Windows — leave on Auto to match your system',
+      'common.auto': 'Auto',
+      'common.mac': 'Mac',
+      'common.win': 'Windows',
       'settings.showHands': 'Show finger zones',
       'settings.showLiveStats': 'Show live stats',
       'settings.focusLine': 'Highlight current line',
@@ -3169,8 +3179,12 @@ TM.data.lessons = (function () {
 <!-- ===== js/keyboard.js ===== -->
 <script>
 /* =========================================================
-   keyboard.js — MacBook 键盘布局 + 标准指法分区
+   keyboard.js — 键盘布局（MacBook / Windows）+ 标准指法分区
    TM.keyboard
+   -----------------------------------------------------
+   两套布局共用同一套 code 命名（MetaLeft 在 Mac 上是 command、
+   在 Windows 上是 Win），因此 highight / flash / markWeak
+   等逻辑对两套布局完全通用。
    ========================================================= */
 window.TM = window.TM || {};
 
@@ -3195,7 +3209,7 @@ TM.keyboard = (function () {
      shift : 上档字符（无则同 code）
      w     : 宽度类名片段
   */
-  var ROWS = [
+  var ROWS_MAC = [
     /* Row 0 — 数字行 */
     [
       { code: '`', shift: '~', finger: 'lp' },
@@ -3277,19 +3291,144 @@ TM.keyboard = (function () {
     ]
   ];
 
-  /* 上档符号 → 基础键 反查表 */
-  var SHIFT_LOOKUP = {};
-  ROWS.forEach(function (row) {
-    row.forEach(function (k) {
-      if (k.shift && k.shift !== k.code) SHIFT_LOOKUP[k.shift] = { code: k.code, shift: true };
-    });
-  });
+  /* Windows (104 键 / ANSI) 键位表
+     与 Mac 版的差异：
+       - 无 fn 键，底行是 Ctrl · Win · Alt · Space · Alt · Win · Menu · Ctrl
+       - command → Win，option → Alt，control → Ctrl
+       - delete/return → Backspace/Enter
+       - Caps Lock 单独成键，右 Shift 与 Mac 等宽
+  */
+  var ROWS_WIN = [
+    [
+      { code: '`', shift: '~', finger: 'lp' },
+      { code: '1', shift: '!', finger: 'lp' },
+      { code: '2', shift: '@', finger: 'lr' },
+      { code: '3', shift: '#', finger: 'lm' },
+      { code: '4', shift: '$', finger: 'li' },
+      { code: '5', shift: '%', finger: 'li' },
+      { code: '6', shift: '^', finger: 'ri' },
+      { code: '7', shift: '&', finger: 'ri' },
+      { code: '8', shift: '*', finger: 'rm' },
+      { code: '9', shift: '(', finger: 'rr' },
+      { code: '0', shift: ')', finger: 'rp' },
+      { code: '-', shift: '_', finger: 'rp' },
+      { code: '=', shift: '+', finger: 'rp' },
+      { code: 'Backspace', label: 'Bksp', finger: 'rp', w: 'w-backspace', noShift: true }
+    ],
+    [
+      { code: 'Tab', label: 'Tab', finger: 'lp', w: 'w-tab', noShift: true },
+      { code: 'q', shift: 'Q', finger: 'lp' },
+      { code: 'w', shift: 'W', finger: 'lr' },
+      { code: 'e', shift: 'E', finger: 'lm' },
+      { code: 'r', shift: 'R', finger: 'li' },
+      { code: 't', shift: 'T', finger: 'li' },
+      { code: 'y', shift: 'Y', finger: 'ri' },
+      { code: 'u', shift: 'U', finger: 'ri' },
+      { code: 'i', shift: 'I', finger: 'rm' },
+      { code: 'o', shift: 'O', finger: 'rr' },
+      { code: 'p', shift: 'P', finger: 'rp' },
+      { code: '[', shift: '{', finger: 'rp' },
+      { code: ']', shift: '}', finger: 'rp' },
+      { code: '\\', shift: '|', finger: 'rp', w: 'w-backslash' }
+    ],
+    [
+      { code: 'CapsLock', label: 'Caps', finger: 'lp', w: 'w-caps', noShift: true },
+      { code: 'a', shift: 'A', finger: 'lp' },
+      { code: 's', shift: 'S', finger: 'lr' },
+      { code: 'd', shift: 'D', finger: 'lm' },
+      { code: 'f', shift: 'F', finger: 'li', home: true },
+      { code: 'g', shift: 'G', finger: 'li' },
+      { code: 'h', shift: 'H', finger: 'ri' },
+      { code: 'j', shift: 'J', finger: 'ri', home: true },
+      { code: 'k', shift: 'K', finger: 'rm' },
+      { code: 'l', shift: 'L', finger: 'rr' },
+      { code: ';', shift: ':', finger: 'rp' },
+      { code: "'", shift: '"', finger: 'rp' },
+      { code: 'Enter', label: 'Enter', finger: 'rp', w: 'w-return', noShift: true }
+    ],
+    [
+      { code: 'ShiftLeft', label: 'Shift', finger: 'lp', w: 'w-lshift', noShift: true },
+      { code: 'z', shift: 'Z', finger: 'lp' },
+      { code: 'x', shift: 'X', finger: 'lr' },
+      { code: 'c', shift: 'C', finger: 'lm' },
+      { code: 'v', shift: 'V', finger: 'li' },
+      { code: 'b', shift: 'B', finger: 'li' },
+      { code: 'n', shift: 'N', finger: 'ri' },
+      { code: 'm', shift: 'M', finger: 'ri' },
+      { code: ',', shift: '<', finger: 'rm' },
+      { code: '.', shift: '>', finger: 'rr' },
+      { code: '/', shift: '?', finger: 'rp' },
+      { code: 'ShiftRight', label: 'Shift', finger: 'rp', w: 'w-rshift', noShift: true }
+    ],
+    [
+      { code: 'ControlLeft', label: 'Ctrl', finger: 'lp', w: 'w-ctrl', noShift: true },
+      { code: 'MetaLeft', label: 'Win', finger: 'th', w: 'w-cmd', noShift: true },
+      { code: 'AltLeft', label: 'Alt', finger: 'lp', w: 'w-alt', noShift: true },
+      { code: 'Space', label: 'space', finger: 'th', w: 'w-space', noShift: true },
+      { code: 'AltRight', label: 'Alt', finger: 'th', w: 'w-alt', noShift: true },
+      { code: 'MetaRight', label: 'Win', finger: 'th', w: 'w-cmd', noShift: true },
+      { code: 'ContextMenu', label: '☰', finger: 'th', w: 'w-alt', noShift: true },
+      { code: 'ControlRight', label: 'Ctrl', finger: 'th', w: 'w-ctrl', noShift: true },
+      { code: 'ArrowLeft', label: '\u2190', finger: 'rp', w: 'w-arrow', noShift: true },
+      { code: 'ArrowUp', label: '\u2191', finger: 'rp', w: 'w-arrow', noShift: true },
+      { code: 'ArrowDown', label: '\u2193', finger: 'rp', w: 'w-arrow', noShift: true },
+      { code: 'ArrowRight', label: '\u2192', finger: 'rp', w: 'w-arrow', noShift: true }
+    ]
+  ];
 
-  /* code → 键对象 */
-  var BY_CODE = {};
-  ROWS.forEach(function (row) {
-    row.forEach(function (k) { BY_CODE[k.code] = k; });
-  });
+  var LAYOUTS = { mac: ROWS_MAC, win: ROWS_WIN };
+
+  /** 当前布局（'mac' | 'win'） */
+  var currentLayout = (window.TM_KB_LAYOUT === 'win' || window.TM_KB_LAYOUT === 'mac')
+    ? window.TM_KB_LAYOUT
+    : 'mac';
+
+  /** 每套布局的索引缓存 */
+  var INDEX = {};
+
+  function buildIndex(id) {
+    if (INDEX[id]) return INDEX[id];
+    var rows = LAYOUTS[id];
+    var shiftLookup = {};
+    var byCode = {};
+    rows.forEach(function (row) {
+      row.forEach(function (k) {
+        if (k.shift && k.shift !== k.code) shiftLookup[k.shift] = { code: k.code, shift: true };
+        byCode[k.code] = k;
+      });
+    });
+    INDEX[id] = { rows: rows, shiftLookup: shiftLookup, byCode: byCode };
+    return INDEX[id];
+  }
+
+  function idx() { return buildIndex(currentLayout); }
+
+  /** 操作系统探测（用于首次打开时给个合理默认值）
+      如果构建时指定了 TM_KB_LAYOUT，则「自动」= 该构建的默认布局 */
+  function detectLayout() {
+    if (window.TM_KB_LAYOUT === 'win' || window.TM_KB_LAYOUT === 'mac') {
+      return window.TM_KB_LAYOUT;
+    }
+    var p = '';
+    try {
+      p = (navigator.platform || '') + ' ' + (navigator.userAgent || '');
+    } catch (e) {}
+    return /Mac|iPhone|iPad|iPod/i.test(p) ? 'mac' : 'win';
+  }
+
+  /** 切换布局 */
+  function setLayout(id) {
+    if (id !== 'mac' && id !== 'win') return;
+    currentLayout = id;
+    buildIndex(id);
+  }
+
+  function getLayout() { return currentLayout; }
+
+  buildIndex('mac');
+  buildIndex('win');
+
+  /* 兼容旧调用：暴露当前布局的行数据 */
 
   /**
    * 字符 → { code, shift }
@@ -3300,11 +3439,13 @@ TM.keyboard = (function () {
     if (ch === ' ') return { code: 'Space', shift: false };
     if (ch === '\n') return { code: 'Enter', shift: false };
 
+    var I = idx();
+
     // 上档符号
-    if (SHIFT_LOOKUP[ch]) return { code: SHIFT_LOOKUP[ch].code, shift: true };
+    if (I.shiftLookup[ch]) return { code: I.shiftLookup[ch].code, shift: true };
 
     var lower = ch.toLowerCase();
-    if (BY_CODE[lower]) return { code: BY_CODE[lower].code, shift: (ch !== lower) };
+    if (I.byCode[lower]) return { code: I.byCode[lower].code, shift: (ch !== lower) };
 
     return null;
   }
@@ -3312,12 +3453,12 @@ TM.keyboard = (function () {
   /** 取字符所属手指 */
   function fingerOf(ch) {
     var k = charToKey(ch);
-    return k ? BY_CODE[k.code].finger : null;
+    return k ? idx().byCode[k.code].finger : null;
   }
 
   /** 该键是否需要另一只手按 Shift（错误用同侧 Shift 是常见坏习惯） */
   function shiftHand(code) {
-    var f = BY_CODE[code] && BY_CODE[code].finger;
+    var f = idx().byCode[code] && idx().byCode[code].finger;
     if (!f) return null;
     return f.charAt(0) === 'l' ? 'right' : 'left';
   }
@@ -3328,9 +3469,9 @@ TM.keyboard = (function () {
   function render(opts) {
     opts = opts || {};
     var util = TM.util;
-    var kb = util.el('div', { class: 'kb' });
+    var kb = util.el('div', { class: 'kb', 'data-layout': currentLayout });
 
-    ROWS.forEach(function (row, ri) {
+    idx().rows.forEach(function (row, ri) {
       var rowEl = util.el('div', { class: 'kb-row' });
       row.forEach(function (k) {
         var attrs = {
@@ -3458,9 +3599,13 @@ TM.keyboard = (function () {
   }
 
   return {
-    ROWS: ROWS,
+    LAYOUTS: LAYOUTS,
+    get ROWS() { return idx().rows; },
     FINGERS: FINGERS,
-    BY_CODE: BY_CODE,
+    get BY_CODE() { return idx().byCode; },
+    setLayout: setLayout,
+    getLayout: getLayout,
+    detectLayout: detectLayout,
     charToKey: charToKey,
     fingerOf: fingerOf,
     shiftHand: shiftHand,
@@ -3837,7 +3982,10 @@ TM.store = (function () {
     showPinyin: true,
     codeLang: 'javascript',
     punctuation: false,
-    numbers: false
+    numbers: false,
+
+    // 虚拟键盘布局：'' = 自动（按系统），可选 'mac' | 'win'
+    kbLayout: ''
   };
 
   var state = {
@@ -6152,6 +6300,23 @@ TM.views = (function () {
     fontRow.appendChild(fg);
     g1.appendChild(fontRow);
 
+    // 键盘布局：自动 / Mac / Windows
+    var layoutRow = el('div', { class: 'set-row' });
+    var layoutLeft = el('div');
+    layoutLeft.appendChild(el('div', { class: 'lbl' }, t('settings.kbLayout')));
+    layoutLeft.appendChild(el('div', { class: 'desc' }, t('settings.kbLayoutDesc')));
+    layoutRow.appendChild(layoutLeft);
+    var lg = el('div', { class: 'tb-group' });
+    [['', 'common.auto'], ['mac', 'common.mac'], ['win', 'common.win']].forEach(function (o) {
+      lg.appendChild(el('button', {
+        class: 'tb-btn' + ((s.kbLayout || '') === o[0] ? ' active' : ''),
+        'data-set': 'kbLayout',
+        'data-val': o[0]
+      }, t(o[1])));
+    });
+    layoutRow.appendChild(lg);
+    g1.appendChild(layoutRow);
+
     g1.appendChild(toggleRow('settings.showKeyboard', 'showKeyboard'));
     g1.appendChild(toggleRow('settings.showHands', 'showHands'));
     g1.appendChild(toggleRow('settings.showLiveStats', 'showLiveStats'));
@@ -7818,6 +7983,7 @@ TM.games = (function () {
     S = TM.store.settings();
 
     applyTheme(S.theme);
+    applyKbLayout(S.kbLayout);
     TM.i18n.set(S.lang);
     bindChrome();
 
@@ -7834,6 +8000,12 @@ TM.games = (function () {
 
   function applyTheme(name) {
     document.documentElement.setAttribute('data-theme', name || 'dark');
+  }
+
+  /** 键盘布局：'' = 自动按系统识别 */
+  function applyKbLayout(v) {
+    var want = (v === 'mac' || v === 'win') ? v : TM.keyboard.detectLayout();
+    TM.keyboard.setLayout(want);
   }
 
   function applyFontSize(size) {
@@ -8820,6 +8992,12 @@ TM.games = (function () {
       var k = btn.getAttribute('data-set');
       var v = btn.getAttribute('data-val');
       if (k === 'fontSize') { S.fontSize = v; TM.store.saveSettings(); applyFontSize(v); }
+      if (k === 'kbLayout') {
+        S.kbLayout = v;
+        TM.store.saveSettings();
+        applyKbLayout(v);
+        if (currentView === 'practice') buildKeyboard();
+      }
       util.$$('.drawer .tb-btn[data-set="' + k + '"]').forEach(function (b) {
         b.classList.toggle('active', b.getAttribute('data-val') === v);
       });
