@@ -6488,7 +6488,7 @@ TM.games = (function () {
   /**
    * 创建游戏壳
    */
-  function makeShell(host, meta) {
+  function makeShell(host, meta, onExit, onLevel) {
     host.innerHTML = '';
 
     var head = el('div', { class: 'game-head' });
@@ -6502,9 +6502,18 @@ TM.games = (function () {
       levelSel.appendChild(el('option', { value: o[0] }, o[1]));
     });
     levelSel.value = meta.level || 'normal';
+    // 难度下拉以前是纯装饰（没绑 change），现在切了就用新难度重开一局
+    levelSel.addEventListener('change', function () {
+      if (typeof onLevel === 'function') onLevel(levelSel.value);
+    });
     right.appendChild(levelSel);
 
     var backBtn = el('button', { class: 'btn sm', 'data-act': 'back' }, t('common.back'));
+    // 注意：返回按钮在 head 里，不在 overlay 内，必须自己绑 click，
+    // 否则 overlay 上的委托永远收不到它的点击（曾经导致「点返回没反应」）。
+    backBtn.addEventListener('click', function () {
+      if (typeof onExit === 'function') onExit();
+    });
     right.appendChild(backBtn);
     head.appendChild(right);
 
@@ -6542,8 +6551,8 @@ TM.games = (function () {
 
   /* ================= 游戏 1：词汇雨 ================= */
 
-  function rain(host, level, langMode, onExit) {
-    var shell = makeShell(host, { level: level, height: 380 });
+  function rain(host, level, langMode, onExit, onLevel) {
+    var shell = makeShell(host, { level: level, height: 380 }, onExit, onLevel);
     var bank = wordBank(langMode, level);
     var speedBase = { easy: 16, normal: 26, hard: 40, insane: 58 }[level] || 26;
 
@@ -6836,8 +6845,8 @@ TM.games = (function () {
 
   /* ================= 游戏 2：竞速 ================= */
 
-  function race(host, level, langMode, onExit) {
-    var shell = makeShell(host, { level: level, height: 260 });
+  function race(host, level, langMode, onExit, onLevel) {
+    var shell = makeShell(host, { level: level, height: 260 }, onExit, onLevel);
     var bank = wordBank(langMode, level);
 
     var cpuWpm = { easy: 28, normal: 45, hard: 65, insane: 90 }[level] || 45;
@@ -7092,8 +7101,8 @@ TM.games = (function () {
 
   /* ================= 游戏 3：星际射击 ================= */
 
-  function shooter(host, level, langMode, onExit) {
-    var shell = makeShell(host, { level: level, height: 400 });
+  function shooter(host, level, langMode, onExit, onLevel) {
+    var shell = makeShell(host, { level: level, height: 400 }, onExit, onLevel);
     var bank = wordBank(langMode, level);
     var speedBase = { easy: 14, normal: 22, hard: 32, insane: 46 }[level] || 22;
 
@@ -7421,8 +7430,8 @@ TM.games = (function () {
 
   /* ================= 游戏 4：按键打地鼠 ================= */
 
-  function mole(host, level, langMode, onExit) {
-    var shell = makeShell(host, { level: level, height: 300 });
+  function mole(host, level, langMode, onExit, onLevel) {
+    var shell = makeShell(host, { level: level, height: 300 }, onExit, onLevel);
     var DURATION = 60;
 
     var LETTERS = langMode === 'zh'
@@ -7667,8 +7676,8 @@ TM.games = (function () {
 
   /* ================= 游戏 5：节奏打字 ================= */
 
-  function rhythm(host, level, langMode, onExit) {
-    var shell = makeShell(host, { level: level, height: 320 });
+  function rhythm(host, level, langMode, onExit, onLevel) {
+    var shell = makeShell(host, { level: level, height: 320 }, onExit, onLevel);
     var bank = wordBank(langMode, 'easy');
 
     var bpm = { easy: 55, normal: 75, hard: 95, insane: 120 }[level] || 75;
@@ -7943,14 +7952,49 @@ TM.games = (function () {
 
   var IMPL = { rain: rain, race: race, shooter: shooter, mole: mole, rhythm: rhythm };
 
+  // 当前活跃游戏（用于 Esc 退出）。模块级只注册一个监听，切难度重开时自动指向新实例。
+  var activeShell = null;
+
   function start(id, host, opts) {
     opts = opts || {};
     var fn = IMPL[id];
     if (!fn) return null;
-    var inst = fn(host, opts.level || 'normal', opts.langMode || 'en', opts.onExit);
-    inst.id = id;
-    return inst;
+
+    var cur = { inst: null, level: opts.level || 'normal' };
+
+    function launch() {
+      var prev = cur.inst;
+      if (prev) { try { prev.destroy(); } catch (e) {} }
+      cur.inst = fn(host, cur.level, opts.langMode || 'en', opts.onExit, function (lv) {
+        cur.level = lv;
+        launch();
+      });
+      if (!cur.inst) return null;
+      cur.inst.id = id;
+      // Esc 也能退出：挂一个全局监听，指向当前实例（切难度重开时自动更新）
+      activeShell = { inst: cur.inst, onExit: opts.onExit };
+      return cur.inst;
+    }
+
+    if (!launch()) return null;
+
+    return {
+      id: id,
+      start: function () { return cur.inst.start && cur.inst.start(); },
+      destroy: function () {
+        try { cur.inst.destroy(); } catch (e) {}
+        if (activeShell && activeShell.inst === cur.inst) activeShell = null;
+      }
+    };
   }
+
+  // Esc 退出游戏（模块级只注册一次，不用每个游戏自己清理）
+  window.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    if (!activeShell || typeof activeShell.onExit !== 'function') return;
+    e.preventDefault();
+    activeShell.onExit();
+  });
 
   return { start: start, IMPL: IMPL, wordBank: wordBank };
 })();
